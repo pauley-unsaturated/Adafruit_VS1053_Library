@@ -19,7 +19,7 @@
    #define digitalPinToInterrupt(x) x
 #endif
 
-static Adafruit_VS1053_FilePlayer *myself;
+static Adafruit_VS1053::Callback _vsCallback = {0, 0};
 
 #ifndef _BV
   #define _BV(x) (1<<(x))
@@ -27,232 +27,16 @@ static Adafruit_VS1053_FilePlayer *myself;
 
 #if defined(__AVR__)
 SIGNAL(TIMER0_COMPA_vect) {
-  myself->feedBuffer();
+  _vsCallback.cb(_vsCallback.ctx);
 }
 #endif
 
-volatile boolean feedBufferLock = false;
-
-static void feeder(void) {
-  myself->feedBuffer();
+static void vsInterruptCB(void) {
+  _vsCallback.cb(_vsCallback.ctx);
 }
 
 #define VS1053_CONTROL_SPI_SETTING  SPISettings(250000,  MSBFIRST, SPI_MODE0)
 #define VS1053_DATA_SPI_SETTING     SPISettings(8000000, MSBFIRST, SPI_MODE0)
-
-
-boolean Adafruit_VS1053_FilePlayer::useInterrupt(uint8_t type) {
-  myself = this;  // oy vey
-    
-  if (type == VS1053_FILEPLAYER_TIMER0_INT) {
-#if defined(__AVR__)
-    OCR0A = 0xAF;
-    TIMSK0 |= _BV(OCIE0A);
-    return true;
-#elif defined(__arm__) && defined(CORE_TEENSY)
-    IntervalTimer *t = new IntervalTimer();
-    return (t && t->begin(feeder, 1024)) ? true : false;
-#elif defined(ARDUINO_STM32_FEATHER)
-    HardwareTimer timer(3);
-    // Pause the timer while we're configuring it
-    timer.pause();
-
-    // Set up period
-    timer.setPeriod(25000); // in microseconds
-
-    // Set up an interrupt on channel 1
-    timer.setChannel1Mode(TIMER_OUTPUT_COMPARE);
-    timer.setCompare(TIMER_CH1, 1);  // Interrupt 1 count after each update
-    timer.attachCompare1Interrupt(feeder); 
-
-    // Refresh the timer's count, prescale, and overflow
-    timer.refresh();
-
-    // Start the timer counting
-    timer.resume();
-    
-#else
-    return false;
-#endif
-  }
-  if (type == VS1053_FILEPLAYER_PIN_INT) {
-    int8_t irq = digitalPinToInterrupt(_dreq);
-    //Serial.print("Using IRQ "); Serial.println(irq);
-    if (irq == -1) 
-      return false;
-#if defined(SPI_HAS_TRANSACTION) && !defined(ESP8266) && !defined(ESP32) && !defined(ARDUINO_STM32_FEATHER)
-    SPI.usingInterrupt(irq);
-#endif
-    attachInterrupt(irq, feeder, CHANGE);
-    return true;
-  }
-  return false;
-}
-
-Adafruit_VS1053_FilePlayer::Adafruit_VS1053_FilePlayer(
-	       int8_t rst, int8_t cs, int8_t dcs, int8_t dreq, 
-	       int8_t cardcs) 
-               : Adafruit_VS1053(rst, cs, dcs, dreq) {
-
-  playingMusic = false;
-  _cardCS = cardcs;
-}
-
-Adafruit_VS1053_FilePlayer::Adafruit_VS1053_FilePlayer(
-	       int8_t cs, int8_t dcs, int8_t dreq, 
-	       int8_t cardcs) 
-  : Adafruit_VS1053(-1, cs, dcs, dreq) {
-
-  playingMusic = false;
-  _cardCS = cardcs;
-}
-
-
-Adafruit_VS1053_FilePlayer::Adafruit_VS1053_FilePlayer(
-               int8_t mosi, int8_t miso, int8_t clk, 
-	       int8_t rst, int8_t cs, int8_t dcs, int8_t dreq, 
-	       int8_t cardcs) 
-               : Adafruit_VS1053(mosi, miso, clk, rst, cs, dcs, dreq) {
-
-  playingMusic = false;
-  _cardCS = cardcs;
-}
-
-boolean Adafruit_VS1053_FilePlayer::begin(void) {
-  // Set the card to be disabled while we get the VS1053 up
-  pinMode(_cardCS, OUTPUT);
-  digitalWrite(_cardCS, HIGH);  
-
-  uint8_t v  = Adafruit_VS1053::begin();   
-
-  //dumpRegs();
-  //Serial.print("Version = "); Serial.println(v);
-  return (v == 4);
-}
-
-
-boolean Adafruit_VS1053_FilePlayer::playFullFile(const char *trackname) {
-  if (! startPlayingFile(trackname)) return false;
-
-  while (playingMusic) {
-    // twiddle thumbs
-    feedBuffer();
-    delay(5);           // give IRQs a chance
-  }
-  // music file finished!
-  return true;
-}
-
-void Adafruit_VS1053_FilePlayer::stopPlaying(void) {
-  // cancel all playback
-  sciWrite(VS1053_REG_MODE, VS1053_MODE_SM_LINE1 | VS1053_MODE_SM_SDINEW | VS1053_MODE_SM_CANCEL);
-  
-  // wrap it up!
-  playingMusic = false;
-  currentTrack.close();
-}
-
-void Adafruit_VS1053_FilePlayer::pausePlaying(boolean pause) {
-  if (pause) 
-    playingMusic = false;
-  else {
-    playingMusic = true;
-    feedBuffer();
-  }
-}
-
-boolean Adafruit_VS1053_FilePlayer::paused(void) {
-  return (!playingMusic && currentTrack);
-}
-
-boolean Adafruit_VS1053_FilePlayer::stopped(void) {
-  return (!playingMusic && !currentTrack);
-}
-
-
-boolean Adafruit_VS1053_FilePlayer::startPlayingFile(const char *trackname) {
-  // reset playback
-  sciWrite(VS1053_REG_MODE, VS1053_MODE_SM_LINE1 | VS1053_MODE_SM_SDINEW);
-  // resync
-  sciWrite(VS1053_REG_WRAMADDR, 0x1e29);
-  sciWrite(VS1053_REG_WRAM, 0);
-
-  currentTrack = SD.open(trackname);
-  if (!currentTrack) {
-    return false;
-  }
-
-  // don't let the IRQ get triggered by accident here
-  noInterrupts();
-
-  // As explained in datasheet, set twice 0 in REG_DECODETIME to set time back to 0
-  sciWrite(VS1053_REG_DECODETIME, 0x00);
-  sciWrite(VS1053_REG_DECODETIME, 0x00);
-
-  playingMusic = true;
-
-  // wait till its ready for data
-  while (! readyForData() ) {
-#if defined(ESP8266)
-	yield();
-#endif
-  }
-
-  // fill it up!
-  while (playingMusic && readyForData()) {
-    feedBuffer();
-  }
-  
-  // ok going forward, we can use the IRQ
-  interrupts();
-
-  return true;
-}
-
-void Adafruit_VS1053_FilePlayer::feedBuffer(void) {
-  noInterrupts();
-  // dont run twice in case interrupts collided
-  // This isn't a perfect lock as it may lose one feedBuffer request if
-  // an interrupt occurs before feedBufferLock is reset to false. This
-  // may cause a glitch in the audio but at least it will not corrupt
-  // state.
-  if (feedBufferLock) {
-    interrupts();
-    return;
-  }
-  feedBufferLock = true;
-  interrupts();
-
-  feedBuffer_noLock();
-
-  feedBufferLock = false;
-}
-
-void Adafruit_VS1053_FilePlayer::feedBuffer_noLock(void) {
-  if ((! playingMusic) // paused or stopped
-      || (! currentTrack) 
-      || (! readyForData())) {
-    return; // paused or stopped
-  }
-
-  // Feed the hungry buffer! :)
-  while (readyForData()) {
-    // Read some audio data from the SD card file
-    int bytesread = currentTrack.read(mp3buffer, VS1053_DATABUFFERLEN);
-    
-    if (bytesread == 0) {
-      // must be at the end of the file, wrap it up!
-      playingMusic = false;
-      currentTrack.close();
-      break;
-    }
-
-    playData(mp3buffer, bytesread);
-  }
-}
-
-
-/***************************************************************/
 
 /* VS1053 'low level' interface */
 static volatile PortReg *clkportreg, *misoportreg, *mosiportreg;
@@ -377,8 +161,54 @@ uint16_t Adafruit_VS1053::loadPlugin(char *plugname) {
   return 0xFFFF;
 }
 
+boolean Adafruit_VS1053::useInterrupt(uint8_t type,
+                                      Adafruit_VS1053::Callback callback) {
+  _vsCallback = callback; // oy vey
 
+  if (type == VS1053_FILEPLAYER_TIMER0_INT) {
+#if defined(__AVR__)
+    OCR0A = 0xAF;
+    TIMSK0 |= _BV(OCIE0A);
+    return true;
+#elif defined(__arm__) && defined(CORE_TEENSY)
+    IntervalTimer *t = new IntervalTimer();
+    return (t && t->begin(vsInterruptCB, 1024)) ? true : false;
+#elif defined(ARDUINO_STM32_FEATHER)
+    HardwareTimer timer(3);
+    // Pause the timer while we're configuring it
+    timer.pause();
 
+    // Set up period
+    timer.setPeriod(25000); // in microseconds
+
+    // Set up an interrupt on channel 1
+    timer.setChannel1Mode(TIMER_OUTPUT_COMPARE);
+    timer.setCompare(TIMER_CH1, 1);  // Interrupt 1 count after each update
+    timer.attachCompare1Interrupt(vsInterruptCB); 
+
+    // Refresh the timer's count, prescale, and overflow
+    timer.refresh();
+
+    // Start the timer counting
+    timer.resume();
+    
+#else
+    return false;
+#endif
+  }
+  if (type == VS1053_FILEPLAYER_PIN_INT) {
+    int8_t irq = digitalPinToInterrupt(_dreq);
+    //Serial.print("Using IRQ "); Serial.println(irq);
+    if (irq == -1) 
+      return false;
+#if defined(SPI_HAS_TRANSACTION) && !defined(ESP8266) && !defined(ESP32) && !defined(ARDUINO_STM32_FEATHER)
+    SPI.usingInterrupt(irq);
+#endif
+    attachInterrupt(irq, vsInterruptCB, CHANGE);
+    return true;
+  }
+  return false;
+}
 
 boolean Adafruit_VS1053::readyForData(void) {
   return digitalRead(_dreq);

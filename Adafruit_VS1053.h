@@ -139,7 +139,17 @@ class Adafruit_VS1053 {
   uint16_t recordedWordsWaiting(void);
   uint16_t recordedReadWord(void);
 
-  uint8_t mp3buffer[VS1053_DATABUFFERLEN];
+  // Interrupt handling
+  // for asynchronous streaming
+  struct Callback {
+  Callback(void* c, void(*f)(void* context))
+  : cb(f), ctx(c) {}
+    void (*cb)(void*);
+    void* ctx;
+  };
+  boolean useInterrupt(uint8_t type, Callback callback);
+  
+  uint8_t out_buffer[VS1053_DATABUFFERLEN];
 
 #ifdef ARDUINO_ARCH_SAMD
 protected:
@@ -154,35 +164,6 @@ private:
   int8_t _mosi, _miso, _clk, _reset, _cs, _dcs;
   boolean useHardwareSPI;
 #endif
-};
-
-
-class Adafruit_VS1053_FilePlayer : public Adafruit_VS1053 {
- public:
-  Adafruit_VS1053_FilePlayer (int8_t mosi, int8_t miso, int8_t clk, 
-			      int8_t rst, int8_t cs, int8_t dcs, int8_t dreq,
-			      int8_t cardCS);
-  Adafruit_VS1053_FilePlayer (int8_t rst, int8_t cs, int8_t dcs, int8_t dreq,
-			      int8_t cardCS);
-  Adafruit_VS1053_FilePlayer (int8_t cs, int8_t dcs, int8_t dreq,
-			      int8_t cardCS);
-
-  boolean begin(void);
-  boolean useInterrupt(uint8_t type);
-  File currentTrack;
-  volatile boolean playingMusic;
-  void feedBuffer(void);
-  boolean startPlayingFile(const char *trackname);
-  boolean playFullFile(const char *trackname);
-  void stopPlaying(void);
-  boolean paused(void);
-  boolean stopped(void);
-  void pausePlaying(boolean pause);
-
- private:
-  void feedBuffer_noLock(void);
-
-  uint8_t _cardCS;
 };
 
 #endif // ADAFRUIT_VS1053_H
