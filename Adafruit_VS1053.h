@@ -27,7 +27,7 @@
 #endif
 
 #include <SPI.h> 
-#include <SD.h>
+#include <SdFat.h>
 
 // define here the size of a register!
 #if defined(ARDUINO_STM32_FEATHER)

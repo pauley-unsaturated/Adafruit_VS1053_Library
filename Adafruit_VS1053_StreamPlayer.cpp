@@ -37,7 +37,7 @@ struct __attribute__ ((packed)) LPCM_WAV_HEADER {
   const char SubChunk1ID[4] = {'f','m','t',' '};
   const uint32_t SubChunk1Size = 0x00000010;
   const uint16_t AudioFormat = 0x01; // PCM
-  const uint16_t NumChannels = 0x01; // Mono (for now)
+  const uint16_t NumChannels = 0x02; // Mono (for now)
   const uint32_t SampleRate  = 44100;
   const uint32_t ByteRate    = 88200; // 16 bits
   const uint16_t BlockAlign  = 2;

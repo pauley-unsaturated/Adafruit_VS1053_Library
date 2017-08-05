@@ -12,6 +12,7 @@
   BSD license, all text above must be included in any redistribution
  ****************************************************/
 
+
 #include <Adafruit_VS1053_FilePlayer.h>
 #include <SD.h>
 
@@ -155,7 +156,7 @@ void Adafruit_VS1053_FilePlayer::feedBuffer_noLock(void) {
   while (_vs.readyForData()) {
     // Read some audio data from the SD card file
     int bytesread = currentTrack.read(_vs.out_buffer, VS1053_DATABUFFERLEN);
-    
+
     if (bytesread == 0) {
       // must be at the end of the file, wrap it up!
       playingMusic = false;

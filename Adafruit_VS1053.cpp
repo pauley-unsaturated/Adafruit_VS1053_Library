@@ -13,7 +13,7 @@
  ****************************************************/
 
 #include <Adafruit_VS1053.h>
-#include <SD.h>
+#include <SdFat.h>
 
 #if defined(ARDUINO_STM32_FEATHER)
    #define digitalPinToInterrupt(x) x
@@ -107,7 +107,7 @@ void Adafruit_VS1053::applyPatch(const uint16_t *patch, uint16_t patchsize) {
 
 uint16_t Adafruit_VS1053::loadPlugin(char *plugname) {
 
-  File plugin = SD.open(plugname);
+  File plugin((const char*)plugname, O_READ);
   if (!plugin) {
     Serial.println("Couldn't open the plugin file");
     Serial.println(plugin);
